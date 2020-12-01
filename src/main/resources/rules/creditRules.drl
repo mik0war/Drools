@@ -1,0 +1,90 @@
+package ru.mirea
+import java.util.Arrays
+dialect  "java"
+
+rule "calculate monthly interest"
+    when
+        $Mortgage: Mortgage(credit.getYearPercent() > 0)
+    then
+        $Mortgage.setMonthlyInterest(
+                getMonthlyInterest(
+                        $Mortgage.getCredit().getYearPercent()));
+        System.out.println("Ежемесечная процентная ставка: " +
+                        $Mortgage.getMonthlyInterest());
+end
+
+rule "calculate monthly and total payment (annuity)"
+    when
+        $Mortgage: Mortgage(credit.getPaymentType() == PaymentType.ANNUITY)
+    then
+        double $payment = getMonthlyPayment(
+                $Mortgage.getCredit().getReminder(),
+                $Mortgage.getCredit().getTerm(),
+                $Mortgage.getMonthlyInterest()
+                );
+
+        for (int i = 0; i < $Mortgage.getCredit().getTerm();i++){
+
+            double $percentPart = $Mortgage.getCredit().getReminder() * $Mortgage.getMonthlyInterest();
+            double $mainPart = $payment - $percentPart;
+
+            $Mortgage.getCredit().setRemainder($Mortgage.getCredit().getReminder() - $mainPart);
+            $Mortgage.setMonthlyPayment(new MonthlyPayment($percentPart, $mainPart), i);
+        }
+
+        System.out.println(Arrays.toString($Mortgage.getMonthlyPayments()));
+        $Mortgage.getCredit().setTotalSum(
+                $Mortgage.getMonthlyPayments()[0].getMonthlyPayment() *
+                $Mortgage.getCredit().getTerm());
+        System.out.println("Общая выплата: " + $Mortgage.getCredit().getTotalSum());
+end
+
+rule "calculate monthly and total payment (differentiated)"
+    when
+        $Mortgage: Mortgage(credit.getPaymentType() == PaymentType.DIFFERENTIATED)
+    then
+        double $mainPart = $Mortgage.getCredit().getReminder() / $Mortgage.getCredit().getTerm();
+        double $payment = 0.0;
+
+        for (int i = 0; i < $Mortgage.getCredit().getTerm();i++){
+
+            double $percentPart = $Mortgage.getCredit().getReminder() * $Mortgage.getMonthlyInterest();
+
+            $Mortgage.getCredit().setRemainder($Mortgage.getCredit().getReminder() - $mainPart);
+            $Mortgage.setMonthlyPayment(new MonthlyPayment($percentPart, $mainPart), i);
+
+            $payment += $mainPart + $percentPart;
+        }
+
+        System.out.println(Arrays.toString($Mortgage.getMonthlyPayments()));
+        $Mortgage.getCredit().setTotalSum($payment);
+        System.out.println("Общая выплата: " + $Mortgage.getCredit().getTotalSum());
+end
+
+rule "approve credit"
+    when
+        $Mortgage: Mortgage(client.age > 0)
+    then
+        if ($Mortgage.getClient().getAge() > 21 &&
+            $Mortgage.getClient().getAge() < 65 &&
+            $Mortgage.getClient().getExperienceMonth() > 3 &&
+            $Mortgage.getClient().getSalary() * 0.4 >
+                $Mortgage.getMonthlyPayments()[0].getMonthlyPayment()){
+
+            $Mortgage.setApproved(true);
+            System.out.println("Банк одобрил выдачу кредита");
+        }
+        else {
+            $Mortgage.setApproved(false);
+            System.out.println("Банк отказал в выдаче кредита");
+        }
+end
+
+function Double getMonthlyInterest(double percent){
+    return percent / 12 / 100;
+}
+
+function Double getMonthlyPayment(double sum, int term, double percent){
+    double generalRate = Math.pow((1 + percent), term);
+    return sum * percent * generalRate / (generalRate - 1);
+}
